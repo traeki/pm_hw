@@ -10,8 +10,25 @@ import math
 
 MAX_SAMPLE_ROWS = 10000
 
+
 def extract_end_motifs(seq, length=4):
     return seq[:length], seq[-length:]
+
+
+def compute_histogram(values, bins=10, custom_edges=None):
+    values = np.array(values, dtype=int)
+    if len(values) == 0:
+        return {}
+
+    if custom_edges is not None:
+        bin_edges = np.array(custom_edges)
+    else:
+        bin_edges = np.linspace(values.min(), values.max(), bins + 1)
+
+    hist, _ = np.histogram(values, bins=bin_edges)
+    bin_labels = [f"{int(bin_edges[i])}-{int(bin_edges[i+1])}" for i in range(len(bin_edges) - 1)]
+    return dict(zip(bin_labels, hist.tolist()))
+
 
 def compute_methylation_stats(df):
     methyl_fracs = df["cpg_methyl_frac"].dropna()
@@ -46,14 +63,19 @@ def compute_methylation_stats(df):
         "n_fragments_without_cpg": int(len(df) - methyl_fracs.count())
     }
 
+
 def load_annotations(annotation_file):
     df = pd.read_csv(annotation_file)
     return df.set_index("Run").to_dict(orient="index")
+
 
 def analyze_bam(bam_path, annotations=None):
     bam = pysam.AlignmentFile(bam_path, "rb")
     fragments = []
     xm_counter = defaultdict(int)
+    start_positions = []
+    end_positions = []
+    fragment_lengths = []
 
     for read in bam.fetch():
         if read.is_unmapped or read.mate_is_unmapped:
@@ -84,6 +106,10 @@ def analyze_bam(bam_path, annotations=None):
             for char in xm:
                 xm_counter[char] += 1
 
+        start_positions.append(start)
+        end_positions.append(end)
+        fragment_lengths.append(insert_size)
+
         fragments.append({
             "start": start,
             "end": end,
@@ -110,20 +136,23 @@ def analyze_bam(bam_path, annotations=None):
         "median_length": float(df["length"].median()),
         "motif_5p_counts": df["motif_5p"].value_counts().to_dict(),
         "motif_3p_counts": df["motif_3p"].value_counts().to_dict(),
-        "xm_counts": dict(xm_counter)
+        "xm_counts": dict(xm_counter),
+        "fragment_length_hist": compute_histogram(fragment_lengths, custom_edges=[0, 130] + list(range(130, 180, 5)) + list(range(180, 301, 10)) + [1001]),
+        "start_position_hist": compute_histogram(start_positions, custom_edges=list(range(0, max(start_positions or [0]) + 1_000_000, 1_000_000))),
+        "end_position_hist": compute_histogram(end_positions, custom_edges=list(range(0, max(end_positions or [0]) + 1_000_000, 1_000_000)))
     }
 
     summary.update(compute_methylation_stats(df))
 
-    # Add annotation if available
     sample_id = bam_path.name.split('.')[0]
     if annotations:
         if sample_id in annotations:
-                    summary.update(annotations[sample_id])
+            summary.update(annotations[sample_id])
         else:
             print(f"[WARNING] No annotation found for sample: {sample_id}")
 
     return df_sampled, summary
+
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze a bisulfite BAM file")
@@ -144,6 +173,7 @@ def main():
 
     print(f"Wrote {len(df_sampled)} sampled fragments to {prefix}.sampled.csv")
     print(f"Wrote summary statistics to {prefix}.summary.json")
+
 
 if __name__ == "__main__":
     main()
