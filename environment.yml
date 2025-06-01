@@ -1,0 +1,19 @@
+name: cfdna
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  - pysam
+  - samtools
+  - pandas
+  - numpy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - joblib
+  - click
+  - pip
+  - pip:
+    - tqdm
